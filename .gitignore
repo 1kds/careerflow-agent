@@ -7,6 +7,7 @@ __pycache__/
 !.env.example
 *.db
 *.db-*
+*.db.bak
 *.sqlite
 *.sqlite-*
 *.sqlite3

@@ -38,14 +38,19 @@ class FakeInteractions:
 class GeminiProviderTest(unittest.TestCase):
     def test_converts_strict_nullable_schema_for_gemini(self):
         tools = gemini_tool_definitions()
-        save_job = next(tool for tool in tools if tool["name"] == "save_job_posting")
+        tool_names = {tool["name"] for tool in tools}
+        save_job = next(tool for tool in tools if tool["name"] == "save_job_posting_analysis")
 
+        self.assertIn("save_job_posting_analysis", tool_names)
+        self.assertIn("update_job_posting", tool_names)
+        self.assertNotIn("save_job_posting", tool_names)
+        self.assertNotIn("save_job_requirements", tool_names)
         self.assertNotIn("strict", save_job)
         self.assertNotIn("additionalProperties", save_job["parameters"])
         self.assertEqual(save_job["parameters"]["properties"]["deadline"]["type"], "string")
         self.assertNotIn("deadline", save_job["parameters"]["required"])
         original_save_job = next(
-            tool for tool in TOOL_DEFINITIONS if tool["name"] == "save_job_posting"
+            tool for tool in TOOL_DEFINITIONS if tool["name"] == "save_job_posting_analysis"
         )
         self.assertTrue(original_save_job["strict"])
         self.assertIn("deadline", original_save_job["parameters"]["required"])
