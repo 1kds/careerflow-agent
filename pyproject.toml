@@ -1,0 +1,16 @@
+[project]
+name = "careerflow"
+version = "0.1.0"
+description = "채용공고와 이력서를 연결하는 툴콜링 기반 취업 준비 에이전트"
+requires-python = ">=3.11"
+dependencies = ["openai>=1.40.0"]
+
+[project.scripts]
+careerflow = "careerflow.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
