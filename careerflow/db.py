@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -72,22 +74,34 @@ class Database:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @contextmanager
+    def session(self) -> Iterator[sqlite3.Connection]:
+        connection = self.connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
-        with self.connect() as connection:
+        with self.session() as connection:
             connection.executescript(SCHEMA)
 
     def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
-        with self.connect() as connection:
+        with self.session() as connection:
             cursor = connection.execute(query, params)
             return int(cursor.lastrowid)
 
     def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-        with self.connect() as connection:
+        with self.session() as connection:
             row = connection.execute(query, params).fetchone()
         return dict(row) if row else None
 
     def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        with self.connect() as connection:
+        with self.session() as connection:
             rows = connection.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 

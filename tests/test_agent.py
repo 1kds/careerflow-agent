@@ -53,7 +53,7 @@ class AgentLoopTest(unittest.TestCase):
             client = SimpleNamespace(responses=FakeResponses())
             agent = CareerFlowAgent(registry, client=client)
 
-            result = agent.run("홍길동의 이력서를 저장해줘: Python 프로젝트")
+            result = agent.run("홍길동의 이력서를 저장해줘: Python 프로젝트", max_rounds=1)
 
             self.assertIn("저장했습니다", result)
             self.assertEqual(client.responses.calls, 2)

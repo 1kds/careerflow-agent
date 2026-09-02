@@ -98,10 +98,10 @@ class ToolRegistry:
             return {"ok": False, "error": f"Unknown tool: {name}"}
         try:
             return self.handlers[name](**arguments)
-        except (ValueError, TypeError) as exc:
+        except (KeyError, ValueError, TypeError) as exc:
             return {"ok": False, "error": str(exc)}
 
-    def save_job_posting(self, company: str, position: str, posting_text: str, deadline: str | None) -> dict[str, Any]:
+    def save_job_posting(self, company: str, position: str, posting_text: str, deadline: str | None = None) -> dict[str, Any]:
         if deadline:
             date.fromisoformat(deadline)
         job_id = self.db.execute(
@@ -155,7 +155,7 @@ class ToolRegistry:
         for item in matches:
             self.db.execute(
                 "INSERT INTO match_results(job_id,candidate_id,requirement,status,job_evidence,resume_evidence,explanation) VALUES(?,?,?,?,?,?,?)",
-                (job_id, candidate_id, item["requirement"], item["status"], item["job_evidence"], item["resume_evidence"], item["explanation"]),
+                (job_id, candidate_id, item["requirement"], item["status"], item["job_evidence"], item.get("resume_evidence"), item["explanation"]),
             )
         return {"ok": True, "saved_count": len(matches)}
 
