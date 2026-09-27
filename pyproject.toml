@@ -10,6 +10,14 @@ dependencies = [
 
 [project.scripts]
 careerflow = "careerflow.cli:main"
+careerflow-web = "careerflow.web:main"
+
+[project.optional-dependencies]
+web = ["pypdf>=5.0"]
+scraper = ["scrapling[fetchers]>=0.4.15"]
+
+[tool.setuptools.package-data]
+careerflow = ["static/*"]
 
 [build-system]
 requires = ["setuptools>=68"]

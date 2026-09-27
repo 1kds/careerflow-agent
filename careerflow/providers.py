@@ -125,7 +125,7 @@ class GeminiProvider:
         if client is None:
             from google import genai
 
-            client = genai.Client()
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
         self.client = client
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
         self.tools = gemini_tool_definitions()
