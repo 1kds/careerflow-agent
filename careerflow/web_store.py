@@ -3,7 +3,7 @@ import hashlib
 import json
 import sqlite3
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timezone
 
 
 class WebStore:
@@ -20,6 +20,26 @@ class WebStore:
                     id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES web_jobs(id),
                     title TEXT NOT NULL, due_date TEXT NOT NULL, status TEXT DEFAULT 'todo',
                     UNIQUE(job_id, title, due_date));
+                CREATE TABLE IF NOT EXISTS job_catalog (
+                    id INTEGER PRIMARY KEY,
+                    source TEXT NOT NULL, source_id TEXT NOT NULL, source_name TEXT NOT NULL,
+                    company TEXT NOT NULL DEFAULT '', position TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '',
+                    location TEXT NOT NULL DEFAULT '', job_type TEXT NOT NULL DEFAULT '',
+                    salary TEXT NOT NULL DEFAULT '', career TEXT NOT NULL DEFAULT '',
+                    deadline TEXT NOT NULL DEFAULT '', posted_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, source_id));
+                CREATE TABLE IF NOT EXISTS job_catalog_interests (
+                    job_id INTEGER NOT NULL REFERENCES job_catalog(id) ON DELETE CASCADE,
+                    category TEXT NOT NULL,
+                    PRIMARY KEY(job_id, category));
+                CREATE INDEX IF NOT EXISTS idx_job_catalog_interest
+                    ON job_catalog_interests(category, job_id);
+                CREATE TABLE IF NOT EXISTS job_sync_state (
+                    category TEXT PRIMARY KEY, last_synced_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS job_preferences (
+                    name TEXT PRIMARY KEY, value TEXT NOT NULL);
             ''')
             if 'deleted_at' not in {row[1] for row in db.execute('PRAGMA table_info(web_tasks)')}:
                 db.execute('ALTER TABLE web_tasks ADD COLUMN deleted_at TEXT')
@@ -32,6 +52,86 @@ class WebStore:
             rows = db.execute(sql, args).fetchall()
             db.commit()
             return [dict(row) for row in rows]
+
+    def upsert_catalog(self, items, category):
+        """Store provider results and associate every result with its selected interest."""
+        clean = []
+        columns = ('source', 'source_id', 'source_name', 'company', 'position', 'description',
+                   'source_url', 'location', 'job_type', 'salary', 'career', 'deadline', 'posted_at')
+        for item in items:
+            row = {key: str(item.get(key, '') or '').strip()[:40000 if key == 'description' else 4000]
+                   for key in columns}
+            if row['source'] and row['source_id'] and row['source_url'].startswith('https://'):
+                clean.append(row)
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('BEGIN IMMEDIATE')
+            for item in clean:
+                db.execute('''INSERT INTO job_catalog
+                    (source,source_id,source_name,company,position,description,source_url,location,
+                     job_type,salary,career,deadline,posted_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                    ON CONFLICT(source,source_id) DO UPDATE SET
+                    source_name=excluded.source_name,company=excluded.company,position=excluded.position,
+                    description=CASE WHEN excluded.description='' THEN job_catalog.description ELSE excluded.description END,
+                    source_url=excluded.source_url,location=excluded.location,job_type=excluded.job_type,
+                    salary=excluded.salary,career=excluded.career,deadline=excluded.deadline,
+                    posted_at=excluded.posted_at,updated_at=CURRENT_TIMESTAMP''',
+                    tuple(item[key] for key in columns))
+                job_id = db.execute('SELECT id FROM job_catalog WHERE source=? AND source_id=?',
+                                    (item['source'], item['source_id'])).fetchone()[0]
+                db.execute('INSERT OR IGNORE INTO job_catalog_interests(job_id,category) VALUES(?,?)',
+                           (job_id, category))
+            db.commit()
+        return len(clean)
+
+    def catalog(self, category, limit=200):
+        limit = max(1, min(int(limit), 500))
+        return self.query('''SELECT j.id,j.source,j.source_id,j.source_name,j.company,j.position,
+            j.source_url,j.location,j.job_type,j.salary,j.career,j.deadline,
+            j.posted_at,j.updated_at FROM job_catalog j
+            JOIN job_catalog_interests i ON i.job_id=j.id
+            WHERE i.category=? ORDER BY
+            CASE WHEN j.deadline='' THEN 1 ELSE 0 END,j.deadline ASC,j.posted_at DESC,j.id DESC LIMIT ?''',
+            (category, limit))
+
+    def catalog_detail(self, job_id):
+        rows = self.query('SELECT * FROM job_catalog WHERE id=?', (job_id,))
+        if not rows:
+            raise ValueError('채용공고를 찾을 수 없습니다.')
+        job = rows[0]
+        job['interests'] = [row['category'] for row in self.query(
+            'SELECT category FROM job_catalog_interests WHERE job_id=? ORDER BY category', (job_id,))]
+        return job
+
+    def update_catalog_description(self, job_id, description):
+        text = str(description or '').strip()[:40000]
+        if len(text) < 30:
+            raise ValueError('공고 상세 내용이 너무 짧아 이력서와 비교할 수 없습니다.')
+        rows = self.query('''UPDATE job_catalog SET description=?,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? RETURNING id''', (text, job_id))
+        if not rows:
+            raise ValueError('채용공고를 찾을 수 없습니다.')
+        return self.catalog_detail(job_id)
+
+    def set_sync_time(self, category, timestamp=None):
+        timestamp = timestamp or datetime.now(timezone.utc).isoformat(timespec='seconds')
+        self.query('''INSERT INTO job_sync_state(category,last_synced_at) VALUES(?,?)
+            ON CONFLICT(category) DO UPDATE SET last_synced_at=excluded.last_synced_at''',
+            (category, timestamp))
+        return timestamp
+
+    def sync_time(self, category):
+        rows = self.query('SELECT last_synced_at FROM job_sync_state WHERE category=?', (category,))
+        return rows[0]['last_synced_at'] if rows else None
+
+    def preference(self, name, default=''):
+        rows = self.query('SELECT value FROM job_preferences WHERE name=?', (name,))
+        return rows[0]['value'] if rows else default
+
+    def set_preference(self, name, value):
+        self.query('''INSERT INTO job_preferences(name,value) VALUES(?,?)
+            ON CONFLICT(name) DO UPDATE SET value=excluded.value''', (name, str(value)))
 
     def save(self, payload, result):
         fields = [str(payload.get(k, '')).strip() for k in ('company', 'position', 'posting')]

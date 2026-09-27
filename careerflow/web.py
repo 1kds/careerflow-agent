@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 ASSETS = Path(__file__).with_name('static')
 MAX_BODY = 8 * 1024 * 1024
@@ -26,10 +27,12 @@ def clean_web_summary(text: str) -> str:
 
 def configuration() -> dict:
     # Only readiness flags, never keys or personal data, are sent to the browser.
+    from .job_sources import INTERESTS, source_status
     return {'providers': {
         'gemini': {'configured': bool(os.getenv('GEMINI_API_KEY'))},
         'openai': {'configured': bool(os.getenv('OPENAI_API_KEY'))},
-    }}
+    }, 'job_sources': source_status(), 'interests': [
+        {'id': item['id'], 'label': item['label']} for item in INTERESTS]}
 
 
 def extract_pdf(data: bytes) -> str:
@@ -114,14 +117,6 @@ def analyze(payload: dict) -> dict:
     return {'mode': mode, 'summary': summary, 'events': events, 'suggestions': suggestions[:15]}
 
 
-def scrape(payload: dict) -> dict:
-    url = payload.get('url')
-    if not isinstance(url, str) or not url.strip() or len(url) > 2000:
-        raise ValueError('채용공고 URL을 입력해주세요 (최대 2,000자).')
-    from .scraper import scrape_job_posting
-    return scrape_job_posting(url)
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # Do not log resume content or request details.
@@ -137,26 +132,43 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path.startswith('/api/'):
+        path = urlsplit(self.path).path
+        if path.startswith('/api/'):
             if self.headers.get('Host') not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
                 return self.reply(403, {'error': '로컬 웹 화면에서만 요청할 수 있습니다.'})
             try:
-                if self.path == '/api/jobs':
+                if path == '/api/jobs':
                     return self.reply(200, {'jobs': self.server.store.jobs()})
-                if self.path == '/api/tasks':
+                if path == '/api/tasks':
                     return self.reply(200, {'tasks': self.server.store.tasks()})
-                if self.path.startswith('/api/jobs/'):
-                    return self.reply(200, self.server.store.detail(int(self.path.rsplit('/', 1)[1])))
+                if path == '/api/discovery':
+                    from .job_sources import INTERESTS, interest, source_status
+                    query = parse_qs(urlsplit(self.path).query)
+                    category = (query.get('category') or [self.server.store.preference('interest')])[0]
+                    if not category:
+                        category = INTERESTS[0]['id']
+                    selected = interest(category)
+                    return self.reply(200, {
+                        'category': category,
+                        'label': selected['label'],
+                        'jobs': self.server.store.catalog(category),
+                        'last_synced_at': self.server.store.sync_time(category),
+                        'sources': source_status(),
+                    })
+                if path.startswith('/api/jobs/'):
+                    return self.reply(200, self.server.store.detail(int(path.rsplit('/', 1)[1])))
+                if path.startswith('/api/catalog/'):
+                    return self.reply(200, self.server.store.catalog_detail(int(path.rsplit('/', 1)[1])))
             except ValueError:
                 return self.reply(404, {'error': '공고를 찾을 수 없습니다.'})
-        if self.path == '/api/config':
+        if path == '/api/config':
             if self.headers.get('Host') not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
                 return self.reply(403, {'error': '로컬 웹 화면에서만 요청할 수 있습니다.'})
             return self.reply(200, configuration())
         files = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
-        if self.path not in files:
+        if path not in files:
             return self.reply(404, {'error': 'Not found'})
-        name, mime = files[self.path]
+        name, mime = files[path]
         self.reply(200, (ASSETS / name).read_bytes(), mime + '; charset=utf-8')
 
     def do_POST(self):
@@ -171,18 +183,45 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(size))
             if not isinstance(payload, dict):
                 raise ValueError('잘못된 요청입니다.')
-            if self.path == '/api/pdf':
+            path = urlsplit(self.path).path
+            if path == '/api/pdf':
                 result = {'text': extract_pdf(base64.b64decode(payload.get('data', ''), validate=True))}
-            elif self.path == '/api/scrape':
-                result = scrape(payload)
-            elif self.path == '/api/analyze':
+            elif path == '/api/preferences':
+                from .job_sources import interest
+                category = str(payload.get('category', ''))
+                interest(category)
+                self.server.store.set_preference('interest', category)
+                result = {'ok': True, 'category': category}
+            elif path == '/api/discovery/sync':
+                from .job_sources import collect_category, interest
+                category = str(payload.get('category', ''))
+                interest(category)
+                items, reports = collect_category(category)
+                count = self.server.store.upsert_catalog(items, category)
+                queried = any(report.get('count', 0) for report in reports)
+                synced_at = self.server.store.set_sync_time(category) if queried else self.server.store.sync_time(category)
+                self.server.store.set_preference('interest', category)
+                result = {'ok': True, 'category': category, 'saved_count': count,
+                          'jobs': self.server.store.catalog(category),
+                          'last_synced_at': synced_at, 'reports': reports}
+            elif path == '/api/catalog/prepare':
+                from .job_sources import fetch_job_description
+                job_id = payload.get('job_id')
+                if type(job_id) is not int or job_id <= 0:
+                    raise ValueError('선택한 채용공고를 찾을 수 없습니다.')
+                job = self.server.store.catalog_detail(job_id)
+                if len(job.get('description', '').strip()) < 30:
+                    description = fetch_job_description(job)
+                    job = self.server.store.update_catalog_description(job_id, description)
+                result = job
+            elif path == '/api/analyze':
                 result = analyze(payload)
                 result['archive_id'] = self.server.store.save(payload, result)
-            elif self.path == '/api/tasks':
+            elif path == '/api/tasks':
                 result = self.server.store.add_task(payload)
-            elif self.path == '/api/tasks/status':
+            elif path == '/api/tasks/status':
                 result = self.server.store.set_status(payload)
-            elif self.path == '/api/tasks/delete':
+            elif path == '/api/tasks/delete':
                 result = self.server.store.delete_tasks(payload)
             else:
                 return self.reply(404, {'error': 'Not found'})
