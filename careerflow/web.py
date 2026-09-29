@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 
 ASSETS = Path(__file__).with_name('static')
 MAX_BODY = 8 * 1024 * 1024
@@ -69,14 +69,24 @@ def analyze(payload: dict) -> dict:
         raise ValueError('이력서와 공고는 각각 30~40,000자로 입력해주세요.')
     mode = payload.get('mode', 'gemini')
     if mode == 'demo':
-        skills = ['Python', 'SQL', 'RAG', 'FastAPI', 'PyTorch', 'Docker', 'React', 'TypeScript', 'AWS', 'Git', 'LangChain', 'Kubernetes']
+        skills = [
+            'Python', 'SQL', 'RAG', 'FastAPI', 'PyTorch', 'Docker', 'React',
+            'TypeScript', 'AWS', 'Git', 'LangChain', 'Kubernetes', 'Java',
+            'Spring', 'Kotlin', 'Swift', 'Next.js', 'REST API', 'React Native',
+            '머신러닝', '데이터 시각화', '통계 분석', '서비스 기획', '요구사항 정의',
+            'A/B 테스트', '프로젝트 관리', 'Figma', '사용자 인터뷰', '사용성 테스트',
+            '와이어프레임', '프로토타입', 'GA4', 'SEO', '카피라이팅', '콘텐츠 기획',
+            '퍼포먼스 마케팅', 'CRM', 'B2B', '사업개발', '고객 관리', '채용',
+            '인사 운영', '급여', '노무', 'Excel', '회계', '재무', '예산 관리',
+            '문서화', '커뮤니케이션',
+        ]
         matches = []
         for skill in skills:
             if skill.casefold() in posting.casefold():
                 evidence = next((line.strip() for line in posting.splitlines() if skill.casefold() in line.casefold()), '')
                 found = next((line.strip() for line in resume.splitlines() if skill.casefold() in line.casefold()), '')
                 matches.append({'skill': skill, 'found': bool(found), 'job': evidence, 'resume': found})
-        return {'mode': 'demo', 'matches': matches, 'events': ['공고 본문 읽기', '고정 기술 목록의 문자열 비교', '원문 근거 표시'], 'summary': '로컬 키워드 비교입니다. LLM·툴콜링을 실행하지 않았으며, 필수/우대 해석이나 합격 가능성을 판단하지 않습니다.'}
+        return {'mode': 'demo', 'matches': matches, 'events': ['공고 본문 읽기', '직무별 키워드 포함 여부 비교', '원문 근거 표시'], 'summary': '로컬 키워드 비교입니다. AI·툴콜링을 실행하지 않았으며, 필수/우대 해석이나 합격 가능성을 판단하지 않습니다.'}
     if mode not in {'gemini', 'openai'} or payload.get('consent') is not True:
         raise ValueError('AI 분석 공급자를 선택하고 외부 전송에 동의해주세요.')
     if not os.getenv('GEMINI_API_KEY' if mode == 'gemini' else 'OPENAI_API_KEY'):
@@ -246,6 +256,8 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     from .web_store import WebStore
     server.store = WebStore(args.db)
+    from .demo_jobs import seed_demo_jobs
+    seed_demo_jobs(server.store)
     print(f'CareerFlow 웹: http://127.0.0.1:{args.port} (종료: Ctrl+C)', flush=True)
     try:
         server.serve_forever()

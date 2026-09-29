@@ -32,8 +32,10 @@ class WebTests(unittest.TestCase):
 
     def test_config_never_exposes_keys(self):
         with patch.dict('os.environ', {'GEMINI_API_KEY': 'secret-test-key'}, clear=True):
-            self.assertEqual(configuration(), {'providers': {
-                'gemini': {'configured': True}, 'openai': {'configured': False}}})
+            config = configuration()
+        self.assertEqual(config['providers'], {
+            'gemini': {'configured': True}, 'openai': {'configured': False}})
+        self.assertNotIn('secret-test-key', repr(config))
 
     def test_default_requires_consent(self):
         with self.assertRaisesRegex(ValueError, '동의'):

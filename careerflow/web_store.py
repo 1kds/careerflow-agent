@@ -61,7 +61,10 @@ class WebStore:
         for item in items:
             row = {key: str(item.get(key, '') or '').strip()[:40000 if key == 'description' else 4000]
                    for key in columns}
-            if row['source'] and row['source_id'] and row['source_url'].startswith('https://'):
+            has_public_source = row['source_url'].startswith('https://')
+            is_local_demo = (row['source'] == 'demo' and not row['source_url']
+                             and len(row['description']) >= 30)
+            if row['source'] and row['source_id'] and (has_public_source or is_local_demo):
                 clean.append(row)
         with closing(sqlite3.connect(self.path)) as db:
             db.execute('PRAGMA foreign_keys=ON')

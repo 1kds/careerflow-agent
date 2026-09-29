@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from careerflow.demo_jobs import demo_jobs, seed_demo_jobs
 from careerflow.web_store import WebStore
 
 
@@ -20,6 +21,25 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(reopened.save(self.payload, {'summary': '새 결과'}), self.id)
         self.assertEqual(len(reopened.jobs()), 1)
         self.assertNotIn('private resume', self.path.read_bytes().decode(errors='ignore'))
+
+    def test_seeds_twenty_one_offline_demo_jobs_idempotently(self):
+        self.assertEqual(len(demo_jobs()), 21)
+        self.assertEqual(seed_demo_jobs(self.store), 21)
+        self.assertEqual(seed_demo_jobs(self.store), 21)
+        for category in ('ai_data', 'software', 'product', 'design', 'marketing', 'sales', 'business'):
+            jobs = self.store.catalog(category)
+            self.assertEqual(len(jobs), 3)
+            self.assertTrue(all(job['source'] == 'demo' for job in jobs))
+            detail = self.store.catalog_detail(jobs[0]['id'])
+            self.assertEqual(detail['source_url'], '')
+            self.assertIn('가상', detail['description'])
+
+    def test_demo_requires_a_local_description(self):
+        saved = self.store.upsert_catalog([{
+            'source': 'demo', 'source_id': 'invalid-demo', 'source_name': '데모',
+            'description': '짧음', 'source_url': '',
+        }], 'ai_data')
+        self.assertEqual(saved, 0)
 
     def test_tasks_approval_dedup_status_and_deadline(self):
         task = {'job_id': self.id, 'title': '검색 실험', 'due_date': '2026-11-01'}

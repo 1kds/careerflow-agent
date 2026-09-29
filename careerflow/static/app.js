@@ -37,7 +37,7 @@ function fillCategories(items) {
 function renderSources(sources) {
   $('source-list').replaceChildren();
   const ready = (sources || []).filter(item => item.configured).length;
-  $('source-copy').textContent = ready ? `${ready}개 출처가 연결되어 있어요. 새 공고 불러오기를 누르면 목록을 갱신합니다.` : '아직 연결된 출처가 없어요. 서버에 공식 API 키를 설정하면 공고를 가져올 수 있습니다.';
+  $('source-copy').textContent = ready ? `${ready}개 공식 출처가 연결되어 있어요. 실제 공고를 가져오면 가상 공고와 함께 표시됩니다.` : '공식 채용 API가 아직 연결되지 않았어요. 테스트용 가상 공고는 아래에서 바로 이용할 수 있습니다.';
   for (const source of sources || []) {
     const item = element('div', ''); item.className = 'source-item';
     const name = element('strong', source.name); const state = element('span', source.configured ? '연결됨' : '키 설정 필요');
@@ -49,26 +49,31 @@ function renderSources(sources) {
 function renderJobs(data) {
   discoveryCache = data;
   $('catalog-title').textContent = `${data.label || '관심 분야'} 공고`;
-  $('catalog-meta').textContent = data.jobs.length ? `저장된 공고 ${data.jobs.length}개 · 마지막 갱신 ${data.last_synced_at ? new Date(data.last_synced_at).toLocaleString('ko-KR') : '없음'}` : '저장된 공고가 없습니다.';
+  const demoCount = data.jobs.filter(job => job.source === 'demo').length;
+  $('catalog-meta').textContent = data.jobs.length
+    ? `총 ${data.jobs.length}개 · 테스트용 가상 공고 ${demoCount}개 · 실제 공고 ${data.jobs.length - demoCount}개`
+    : '저장된 공고가 없습니다.';
   renderSources(data.sources);
   $('job-list').replaceChildren();
   if (!data.jobs.length) {
     const empty = element('section', ''); empty.className = 'empty-state panel';
-    empty.append(element('strong', '아직 저장된 공고가 없어요.'), element('p', 'API 출처를 연결한 뒤 새 공고 불러오기를 누르면 이 분야의 공고를 모아 저장합니다.'));
+    empty.append(element('strong', '아직 이 분야 공고가 없어요.'), element('p', '관심 분야를 바꾸거나 채용 API 키를 설정해 실제 공고를 추가해보세요.'));
     $('job-list').append(empty); return;
   }
   for (const job of data.jobs) {
     const card = element('article', ''); card.className = 'job-card';
     const top = element('div', ''); top.className = 'job-card-top';
     const heading = element('div', ''); heading.append(element('span', job.source_name || '채용 출처'), element('h3', job.position || '제목 미공개'));
-    top.append(heading, element('span', job.deadline ? `마감 ${job.deadline}` : '마감일 미정'));
+    if (job.source === 'demo') heading.append(element('span', '테스트용 가상 공고'));
+    top.append(heading, element('span', job.deadline ? `마감 ${job.deadline}` : job.source === 'demo' ? '상시 예시' : '마감일 미정'));
     const company = element('p', job.company || '회사 미공개'); company.className = 'job-company';
     const facts = [job.location, job.career, job.job_type, job.salary].filter(Boolean).join(' · ');
     card.append(top, company);
     if (facts) { const meta = element('p', facts); meta.className = 'job-facts'; card.append(meta); }
     if (job.posted_at) { const posted = element('p', `등록 ${job.posted_at}`); posted.className = 'job-posted'; card.append(posted); }
     const footer = element('div', ''); footer.className = 'job-card-actions';
-    footer.append(safeExternalLink(job.source_url, `${job.source_name || '출처'} 원문 ↗`));
+    if (job.source === 'demo') footer.append(element('span', '실제 채용 정보가 아닙니다'));
+    else if (job.source_url) footer.append(safeExternalLink(job.source_url, `${job.source_name || '출처'} 원문 ↗`));
     footer.append(action('이 공고로 이력서 비교', () => prepareJob(job.id), 'primary'));
     card.append(footer); $('job-list').append(card);
   }
@@ -89,6 +94,10 @@ async function loadDiscovery({autoSync=false}={}) {
 }
 async function syncJobs(automatic=false) {
   if (busy) return;
+  if (!(serverConfig?.job_sources || []).some(source => source.configured)) {
+    discoveryStatus('사람인·고용24 API 키가 아직 없습니다. 테스트용 가상 공고는 그대로 이용할 수 있어요.');
+    return;
+  }
   const category = $('category').value;
   $('sync-jobs').disabled = true; $('refresh-list').disabled = true; $('category').disabled = true;
   discoveryStatus(automatic ? '연결된 출처에서 공고를 확인하고 있어요…' : '공식 출처에서 공고를 수집해 저장하고 있어요…');
@@ -120,6 +129,7 @@ function showSelectedJob(job) {
   const box = $('selected-job'); box.replaceChildren();
   const summary = element('div', ''); summary.className = 'selected-job-summary';
   summary.append(element('span', job.source_name || '채용 출처'), element('h2', `${job.company || '회사 미공개'} · ${job.position || '제목 미공개'}`));
+  if (job.source === 'demo') summary.append(element('p', '테스트용 가상 공고입니다. 실제 기업·채용 정보가 아니며 원문 링크도 없습니다.'));
   const details = [job.location, job.career, job.job_type, job.deadline ? `마감 ${job.deadline}` : '마감일 미정'].filter(Boolean).join(' · ');
   summary.append(element('p', details)); if(job.source_url)summary.append(safeExternalLink(job.source_url, `${job.source_name || '채용 출처'} 원문 보기 ↗`));
   box.append(summary);
@@ -130,8 +140,12 @@ async function prepareJob(id) {
   discoveryStatus('선택한 공고의 상세 내용을 불러오고 있어요…');
   try {
     const job = await post('/api/catalog/prepare', {job_id:id});
-    showSelectedJob(job); navigate('resume');
-    status('공고 내용을 가져왔어요. 원문을 검토한 뒤 이력서를 입력해 주세요.');
+    showSelectedJob(job);
+    if (job.source === 'demo') { $('mode').value='demo'; modeChanged(); }
+    navigate('resume');
+    status(job.source === 'demo'
+      ? '가상 공고를 불러왔어요. 로컬 키워드 비교로 API 없이 체험할 수 있습니다.'
+      : '공고 내용을 가져왔어요. 원문을 검토한 뒤 이력서를 입력해 주세요.');
   } catch (error) {
     discoveryStatus(`${error.message} 출처 원문 링크를 확인한 뒤 다시 시도해주세요.`, true);
   } finally { document.querySelectorAll('.job-card-actions button').forEach(button=>button.disabled=false); }
@@ -168,7 +182,7 @@ $('sample').addEventListener('click',()=>{
     description:'[주요 업무]\n사내 문서 RAG 시스템 개발 및 Python 기반 AI 서비스 구현\nFastAPI 기반 백엔드 API 개발\n\n[자격 요건]\nPython 및 SQL 활용 경험\nGit을 이용한 협업 경험\n\n[우대 사항]\nLangChain 기반 검색 파이프라인 개발 경험\nDocker 컨테이너 및 AWS 배포 경험'};
   showSelectedJob(demoJob);
   $('resume').value='지원자: 샘플 지원자 (가상 데이터)\n\n[프로젝트 경험]\nPython과 LangChain을 이용해 금융 문서 RAG 챗봇을 개발했습니다.\nFastAPI로 검색 API를 구현하고 Git으로 변경 사항을 관리했습니다.\nSQL과 SQLite로 대화 기록을 저장했습니다.\n\n[학습 경험]\nPyTorch를 활용해 시계열 모델을 비교했습니다.';
-  $('filename').textContent='샘플 이력서 · 가상 데이터'; modeChanged(); navigate('resume');
+  $('filename').textContent='샘플 이력서 · 가상 데이터'; $('mode').value='demo'; modeChanged(); navigate('resume');
   status('가상 자료를 넣었어요. 분석 방식과 전송 동의를 확인한 뒤 비교 버튼을 눌러보세요.');
 });
 $('form').addEventListener('submit',async event=>{
@@ -185,7 +199,7 @@ $('form').addEventListener('submit',async event=>{
       for(const text of ['공고 · '+match.job,'이력서 · '+(match.resume||'기재된 근거가 없습니다. 실제 경험이 있다면 보완해주세요.')])row.append(element('p',text));
       $('matches').append(row);
     }
-    if(data.matches?.length===0)$('matches').append(element('p','고정 기술 목록과 일치하는 키워드가 없습니다. 의미 기반 비교는 AI 분석을 선택해주세요.'));
+    if(data.matches?.length===0)$('matches').append(element('p','비교 목록에 포함한 키워드와 일치하는 표현이 없습니다. 의미 기반 분석은 AI 분석을 선택해주세요.'));
     $('events').replaceChildren();
     for(const event of data.events||[]) $('events').append(element('li',typeof event==='string'?event:`${event.tool} · ${event.ok?'완료':'검증 실패 또는 제한'}`));
     $('result').hidden=false; status('비교 완료. 공고와 분석 결과를 로컬 보관함에 저장했어요.'); $('result').scrollIntoView({behavior:'smooth',block:'start'});
