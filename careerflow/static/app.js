@@ -1,7 +1,9 @@
 const $ = id => document.getElementById(id);
 let busy = false, lastResult = null, currentView = 'discovery';
 let serverConfig = null, selectedJob = null, discoveryCache = null;
-let savedResume = '', savedResumeFilename = '';
+let savedResume = '', savedResumeFilename = '', savedResumeName = '';
+let savedResumes = [], selectedResumeId = null, editingResumeId = null;
+let resumeDraftBaseline = {name:'',content:'',filename:'이력서 PDF를 여기에 놓아주세요'};
 const autoSyncTried = new Set();
 const status = (message, error = false) => { $('status').textContent = message; $('status').className = error ? 'error' : ''; };
 const discoveryStatus = (message, error = false) => { $('discovery-status').textContent = message; $('discovery-status').className = error ? 'inline-status error' : 'inline-status'; };
@@ -17,19 +19,116 @@ function lockResumeForm(value) {
 function renderSavedResume() {
   $('resume-preview').value = savedResume;
   $('saved-resume-meta').textContent = savedResume
-    ? `${savedResumeFilename || '이력서'} · 저장됨`
+    ? `${savedResumeName || '이력서'} · ${savedResumeFilename || '직접 입력'} · 저장됨`
     : '이력서를 등록하면 여기에 표시돼요.';
 }
 async function loadSavedResume() {
-  const data = await get('/api/resume');
-  savedResume = data.resume?.content || '';
-  savedResumeFilename = data.resume?.filename || '';
-  if (data.resume) {
-    $('resume').value = savedResume;
-    $('filename').textContent = savedResumeFilename;
-    $('resume-status').textContent = '저장한 이력서를 불러왔어요.';
-  }
+  const data = await get('/api/resumes');
+  savedResumes = data.resumes || [];
+  selectedResumeId = data.selected_resume_id;
+  const active = selectedResumeId ? await get(`/api/resumes/${selectedResumeId}`) : {resume:null};
+  savedResume = active.resume?.content || '';
+  savedResumeFilename = active.resume?.filename || '';
+  savedResumeName = active.resume?.name || '';
   renderSavedResume();
+  renderResumeList();
+  startNewResume();
+}
+function renderResumeList() {
+  const list = $('resume-list');
+  list.replaceChildren();
+  $('resume-count').textContent = `${savedResumes.length}개`;
+  if (!savedResumes.length) {
+    const empty = element('div', ''); empty.className = 'resume-list-empty';
+    empty.append(element('strong', '저장한 이력서가 없어요.'), element('span', '왼쪽에서 첫 이력서를 등록해보세요.'));
+    list.append(empty); return;
+  }
+  for (const resume of savedResumes) {
+    const card = element('article', ''); card.className = 'resume-item';
+    const active = resume.id === selectedResumeId;
+    if (active) card.classList.add('active');
+    const heading = element('div', ''); heading.className = 'resume-item-heading';
+    heading.append(element('strong', resume.name));
+    if (active) { const badge = element('span', '비교에 사용 중'); badge.className = 'badge'; heading.append(badge); }
+    const when = String(resume.updated_at || '').slice(0, 10);
+    const meta = element('p', [resume.filename || '직접 입력', when].filter(Boolean).join(' · ')); meta.className = 'resume-item-meta';
+    const actions = element('div', ''); actions.className = 'resume-item-actions';
+    const use = action(active ? '사용 중' : '비교에 사용', () => selectResume(resume.id), active ? 'secondary' : 'primary');
+    use.disabled = active;
+    actions.append(use,
+      action('수정', () => loadResumeIntoEditor(resume.id)),
+      action('복제', () => duplicateResume(resume.id)),
+      action('삭제', () => deleteResume(resume.id)));
+    card.append(heading, meta, actions); list.append(card);
+  }
+}
+function startNewResume(copy = null) {
+  editingResumeId = null;
+  $('resume-editor-title').textContent = '새 이력서 등록';
+  $('resume-name').value = copy ? `${copy.name} 복사본`.slice(0, 80) : '';
+  $('resume').value = copy?.content || '';
+  $('filename').textContent = copy?.filename || '이력서 PDF를 여기에 놓아주세요';
+  $('pdf').value = '';
+  $('save-resume').textContent = '새 이력서 저장';
+  $('copy-resume').hidden = true;
+  resumeDraftBaseline = {name:'',content:'',filename:'이력서 PDF를 여기에 놓아주세요'};
+  resumeStatus(copy ? '복제본을 수정한 뒤 새 이력서로 저장하세요.' : '');
+}
+function resumeDraftHasChanges() {
+  return $('resume-name').value !== resumeDraftBaseline.name
+    || $('resume').value !== resumeDraftBaseline.content
+    || $('filename').textContent !== resumeDraftBaseline.filename;
+}
+function confirmResumeDraftDiscard() {
+  return !resumeDraftHasChanges() || window.confirm('저장하지 않은 입력은 사라집니다. 계속할까요?');
+}
+async function loadResumeIntoEditor(id) {
+  if (!confirmResumeDraftDiscard()) return;
+  try {
+    const {resume} = await get(`/api/resumes/${id}`);
+    editingResumeId = resume.id;
+    $('resume-editor-title').textContent = '이력서 수정';
+    $('resume-name').value = resume.name;
+    $('resume').value = resume.content;
+    $('filename').textContent = resume.filename;
+    $('pdf').value = '';
+    $('save-resume').textContent = '변경사항 저장';
+    $('copy-resume').hidden = false;
+    resumeDraftBaseline = {name:resume.name,content:resume.content,filename:resume.filename};
+    resumeStatus(`${resume.name}을 수정 중이에요.`);
+    $('resume-name').focus();
+  } catch (error) { resumeStatus('이력서를 불러오지 못했어요. 다시 시도해 주세요.', true); }
+}
+async function duplicateResume(id) {
+  if (!confirmResumeDraftDiscard()) return;
+  try {
+    const {resume} = await get(`/api/resumes/${id}`);
+    startNewResume(resume);
+    $('resume-name').focus();
+  } catch (error) { resumeStatus('이력서를 복제하지 못했어요. 다시 시도해 주세요.', true); }
+}
+async function selectResume(id) {
+  try {
+    const data = await post('/api/resumes/select', {resume_id:id});
+    savedResumes = data.resumes; selectedResumeId = data.selected_resume_id;
+    savedResume = data.resume?.content || ''; savedResumeFilename = data.resume?.filename || '';
+    savedResumeName = data.resume?.name || '';
+    renderSavedResume(); renderResumeList();
+    resumeStatus(`${savedResumeName}을 공고 비교에 사용하도록 선택했어요.`);
+  } catch (error) { resumeStatus('비교에 사용할 이력서를 바꾸지 못했어요.', true); }
+}
+async function deleteResume(id) {
+  const target = savedResumes.find(resume => resume.id === id);
+  if (!target || !window.confirm(`“${target.name}” 이력서를 삭제할까요?`)) return;
+  try {
+    const data = await post('/api/resumes/delete', {resume_id:id});
+    savedResumes = data.resumes; selectedResumeId = data.selected_resume_id;
+    savedResume = data.resume?.content || ''; savedResumeFilename = data.resume?.filename || '';
+    savedResumeName = data.resume?.name || '';
+    if (editingResumeId === id) startNewResume();
+    renderSavedResume(); renderResumeList();
+    resumeStatus('이력서를 삭제했어요.');
+  } catch (error) { resumeStatus('이력서를 삭제하지 못했어요. 다시 시도해 주세요.', true); }
 }
 async function post(path, data) {
   const response = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
@@ -185,13 +284,23 @@ $('resume-form').addEventListener('submit',async event=>{
   event.preventDefault(); if(busy)return;
   lockResumeForm(true); $('save-resume').textContent='저장 중…';
   try {
-    const data=await post('/api/resume',{content:$('resume').value,filename:$('filename').textContent||'직접 입력'});
-    savedResume=data.resume.content; savedResumeFilename=data.resume.filename;
-    renderSavedResume(); resumeStatus('이력서를 저장했어요. 원하는 공고와 비교할 수 있습니다.');
+    const data=await post('/api/resumes',{resume_id:editingResumeId,name:$('resume-name').value,content:$('resume').value,filename:$('filename').textContent||'직접 입력'});
+    savedResumes=data.resumes; selectedResumeId=data.selected_resume_id;
+    savedResume=data.resume.content; savedResumeFilename=data.resume.filename; savedResumeName=data.resume.name;
+    editingResumeId=data.resume.id; $('resume-editor-title').textContent='이력서 수정'; $('copy-resume').hidden=false;
+    resumeDraftBaseline = {name:data.resume.name,content:data.resume.content,filename:data.resume.filename};
+    renderSavedResume(); renderResumeList(); resumeStatus('저장했어요. 이 이력서를 공고 비교에 사용합니다.');
   } catch(error) { resumeStatus(error.message,true); }
-  finally { lockResumeForm(false); $('save-resume').textContent='이력서 저장'; }
+  finally { lockResumeForm(false); $('save-resume').textContent=editingResumeId?'변경사항 저장':'새 이력서 저장'; }
 });
+$('new-resume').addEventListener('click',()=>{
+  if(!confirmResumeDraftDiscard())return;
+  startNewResume();
+});
+$('copy-resume').addEventListener('click',()=>{if(editingResumeId)duplicateResume(editingResumeId);});
 $('sample').addEventListener('click',()=>{
+  if(!confirmResumeDraftDiscard())return;
+  startNewResume(); $('resume-name').value='예시 이력서';
   $('resume').value='지원자: 샘플 지원자\n\n[프로젝트 경험]\nPython과 LangChain을 이용해 금융 문서 검색 서비스를 만들었습니다.\nFastAPI로 검색 기능을 구현하고 Git으로 팀원들과 협업했습니다.\nSQL과 SQLite를 사용해 서비스 데이터를 관리했습니다.\n\n[학습 경험]\nPyTorch를 활용해 시계열 예측 모델을 비교했습니다.';
   $('filename').textContent='예시 이력서';
   resumeStatus('예시 내용을 채웠어요. 저장을 누르면 공고 비교에서 사용할 수 있어요.');
@@ -227,7 +336,7 @@ $('form').addEventListener('submit',async event=>{
   if(!selectedJob) return status('먼저 채용공고 찾기에서 공고를 선택해주세요.',true);
   if($('mode').value!=='demo'&&!$('consent').checked)return status('AI 비교를 진행하려면 동의가 필요해요.',true);
   const payload=Object.fromEntries(['posting','company','position','deadline','mode'].map(id=>[id,$(id).value]));
-  payload.resume=savedResume;
+  payload.resume=savedResume; payload.resume_id=selectedResumeId; payload.resume_name=savedResumeName;
   payload.consent=$('consent').checked; payload.source_url=$('url').value;
   lock(true); $('result').hidden=true; status('이력서와 공고를 비교하고 있어요…');
   try {
@@ -323,6 +432,7 @@ async function openJob(id, detail, toggle) {
     detail.replaceChildren();
     detail.append(element('h3','비교 결과'));
     const result=element('p',job.result.summary);result.className='saved-summary';detail.append(result);
+    if(job.result.resume_name)detail.append(element('p',`비교에 사용한 이력서 · ${job.result.resume_name}`));
     const original=element('details','');original.append(element('summary','채용공고 내용'),element('p',job.posting));detail.append(original);
     detail.append(element('h3','다음에 준비할 일'),element('p','필요한 항목을 골라 기한을 정하고 등록하세요.'));
     function taskForm(suggestion){
@@ -348,7 +458,10 @@ async function openJob(id, detail, toggle) {
 }
 document.querySelectorAll('.sidebar .nav').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.view)));
 $('result').append(action('공고 보관함에서 준비 이어가기',()=>navigate('jobs')));
-$('edit-resume').addEventListener('click',()=>navigate('resume-register'));
+$('edit-resume').addEventListener('click',async()=>{
+  await navigate('resume-register');
+  if(selectedResumeId)await loadResumeIntoEditor(selectedResumeId);
+});
 
 async function initialize() {
   try {

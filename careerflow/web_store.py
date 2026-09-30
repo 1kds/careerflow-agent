@@ -45,9 +45,27 @@ class WebStore:
                     content TEXT NOT NULL,
                     filename TEXT NOT NULL DEFAULT '직접 입력',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS web_resumes (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    filename TEXT NOT NULL DEFAULT '직접 입력',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             ''')
             if 'deleted_at' not in {row[1] for row in db.execute('PRAGMA table_info(web_tasks)')}:
                 db.execute('ALTER TABLE web_tasks ADD COLUMN deleted_at TEXT')
+            legacy_resume = db.execute(
+                'SELECT content,filename,updated_at FROM web_resume_profile WHERE id=1').fetchone()
+            has_resumes = db.execute('SELECT 1 FROM web_resumes LIMIT 1').fetchone()
+            migrated = db.execute(
+                "SELECT 1 FROM job_preferences WHERE name='resume_collection_migrated'").fetchone()
+            if not migrated:
+                if legacy_resume and not has_resumes:
+                    cursor = db.execute('''INSERT INTO web_resumes(name,content,filename,updated_at)
+                        VALUES('기본 이력서',?,?,?)''', tuple(legacy_resume))
+                    db.execute('''INSERT INTO job_preferences(name,value) VALUES('active_resume_id',?)
+                        ON CONFLICT(name) DO NOTHING''', (str(cursor.lastrowid),))
+                db.execute("INSERT INTO job_preferences(name,value) VALUES('resume_collection_migrated','1')")
             db.commit()
 
     def query(self, sql, args=()):
@@ -141,23 +159,97 @@ class WebStore:
         self.query('''INSERT INTO job_preferences(name,value) VALUES(?,?)
             ON CONFLICT(name) DO UPDATE SET value=excluded.value''', (name, str(value)))
 
-    def resume_profile(self):
-        rows = self.query('SELECT content,filename,updated_at FROM web_resume_profile WHERE id=1')
+    def resume_collection(self):
+        resumes = self.query('''SELECT id,name,filename,updated_at FROM web_resumes
+            ORDER BY updated_at DESC,id DESC''')
+        ids = {row['id'] for row in resumes}
+        try:
+            selected_id = int(self.preference('active_resume_id'))
+        except (TypeError, ValueError):
+            selected_id = None
+        if selected_id not in ids:
+            selected_id = resumes[0]['id'] if resumes else None
+            self.set_preference('active_resume_id', selected_id or '')
+        return {'resumes': resumes, 'selected_resume_id': selected_id}
+
+    def selected_resume(self):
+        selected_id = self.resume_collection()['selected_resume_id']
+        if selected_id is None:
+            return None
+        rows = self.query('''SELECT id,name,content,filename,updated_at FROM web_resumes WHERE id=?''',
+                          (selected_id,))
         return rows[0] if rows else None
 
-    def save_resume_profile(self, payload):
+    def select_resume(self, payload):
+        try:
+            resume_id = int(payload.get('resume_id'))
+        except (TypeError, ValueError):
+            raise ValueError('사용할 이력서를 선택해주세요.')
+        rows = self.query('SELECT id FROM web_resumes WHERE id=?', (resume_id,))
+        if not rows:
+            raise ValueError('이력서를 찾을 수 없습니다.')
+        self.set_preference('active_resume_id', resume_id)
+        return {'resume': self.selected_resume(), **self.resume_collection()}
+
+    def save_resume(self, payload):
         content = payload.get('content')
         if not isinstance(content, str):
             raise ValueError('이력서 내용을 입력해주세요.')
         content = content.strip()
         if not 30 <= len(content) <= 40000:
             raise ValueError('이력서는 30~40,000자로 입력해주세요.')
+        name = str(payload.get('name') or '').strip()[:80]
+        if not name:
+            raise ValueError('이력서 이름을 입력해주세요.')
         filename = str(payload.get('filename') or '직접 입력').strip()[:160] or '직접 입력'
-        rows = self.query('''INSERT INTO web_resume_profile(id,content,filename,updated_at)
-            VALUES(1,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET
-            content=excluded.content,filename=excluded.filename,updated_at=CURRENT_TIMESTAMP
-            RETURNING content,filename,updated_at''', (content, filename))
+        resume_id = payload.get('resume_id')
+        if resume_id not in (None, ''):
+            try:
+                resume_id = int(resume_id)
+            except (TypeError, ValueError):
+                raise ValueError('수정할 이력서를 찾을 수 없습니다.')
+            rows = self.query('''UPDATE web_resumes SET name=?,content=?,filename=?,updated_at=CURRENT_TIMESTAMP
+                WHERE id=? RETURNING id,name,content,filename,updated_at''',
+                (name, content, filename, resume_id))
+            if not rows:
+                raise ValueError('수정할 이력서를 찾을 수 없습니다.')
+            saved = rows[0]
+        else:
+            rows = self.query('''INSERT INTO web_resumes(name,content,filename)
+                VALUES(?,?,?) RETURNING id,name,content,filename,updated_at''', (name, content, filename))
+            saved = rows[0]
+        self.set_preference('active_resume_id', saved['id'])
+        return {'resume': saved, **self.resume_collection()}
+
+    def delete_resume(self, payload):
+        try:
+            resume_id = int(payload.get('resume_id'))
+        except (TypeError, ValueError):
+            raise ValueError('삭제할 이력서를 선택해주세요.')
+        rows = self.query('DELETE FROM web_resumes WHERE id=? RETURNING id', (resume_id,))
+        if not rows:
+            raise ValueError('삭제할 이력서를 찾을 수 없습니다.')
+        collection = self.resume_collection()
+        return {'resume': self.selected_resume(), **collection}
+
+    def resume_profile(self):
+        """Backward-compatible accessor for the currently selected resume."""
+        return self.selected_resume()
+
+    def resume_by_id(self, resume_id):
+        rows = self.query('SELECT id,name,content,filename,updated_at FROM web_resumes WHERE id=?',
+                          (resume_id,))
+        if not rows:
+            raise ValueError('이력서를 찾을 수 없습니다.')
         return rows[0]
+
+    def save_resume_profile(self, payload):
+        """Backward-compatible save endpoint for older browser clients."""
+        collection = self.resume_collection()
+        active = collection['selected_resume_id']
+        current = self.selected_resume()
+        return self.save_resume({**payload, 'name': payload.get('name') or (current or {}).get('name') or '기본 이력서',
+                                 'resume_id': payload.get('resume_id') or active})['resume']
 
     def save(self, payload, result):
         fields = [str(payload.get(k, '')).strip() for k in ('company', 'position', 'posting')]

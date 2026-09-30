@@ -151,6 +151,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, {'jobs': self.server.store.jobs()})
                 if path == '/api/tasks':
                     return self.reply(200, {'tasks': self.server.store.tasks()})
+                if path == '/api/resumes':
+                    return self.reply(200, self.server.store.resume_collection())
+                if path.startswith('/api/resumes/'):
+                    return self.reply(200, {'resume': self.server.store.resume_by_id(int(path.rsplit('/', 1)[1]))})
                 if path == '/api/resume':
                     return self.reply(200, {'resume': self.server.store.resume_profile()})
                 if path == '/api/discovery':
@@ -171,8 +175,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, self.server.store.detail(int(path.rsplit('/', 1)[1])))
                 if path.startswith('/api/catalog/'):
                     return self.reply(200, self.server.store.catalog_detail(int(path.rsplit('/', 1)[1])))
-            except ValueError:
-                return self.reply(404, {'error': '공고를 찾을 수 없습니다.'})
+            except ValueError as exc:
+                return self.reply(404, {'error': str(exc) or '요청한 자료를 찾을 수 없습니다.'})
         if path == '/api/config':
             if self.headers.get('Host') not in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}:
                 return self.reply(403, {'error': '로컬 웹 화면에서만 요청할 수 있습니다.'})
@@ -196,7 +200,13 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError('잘못된 요청입니다.')
             path = urlsplit(self.path).path
-            if path == '/api/resume':
+            if path == '/api/resumes':
+                result = self.server.store.save_resume(payload)
+            elif path == '/api/resumes/select':
+                result = self.server.store.select_resume(payload)
+            elif path == '/api/resumes/delete':
+                result = self.server.store.delete_resume(payload)
+            elif path == '/api/resume':
                 result = {'resume': self.server.store.save_resume_profile(payload)}
             elif path == '/api/pdf':
                 result = {'text': extract_pdf(base64.b64decode(payload.get('data', ''), validate=True))}
@@ -230,6 +240,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = job
             elif path == '/api/analyze':
                 result = analyze(payload)
+                result['resume_name'] = str(payload.get('resume_name', ''))[:80]
                 result['archive_id'] = self.server.store.save(payload, result)
             elif path == '/api/tasks':
                 result = self.server.store.add_task(payload)

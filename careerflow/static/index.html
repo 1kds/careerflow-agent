@@ -27,17 +27,25 @@
       </section>
 
       <section id="resume-register-page" class="page" hidden>
-        <div class="intro"><div><div class="eyebrow">YOUR EXPERIENCE</div><h1>나의 이력서를<br>먼저 등록해요<span>.</span></h1><p>한 번 저장하면 관심 있는 공고와 바로 비교할 수 있어요.</p></div></div>
-        <form id="resume-form">
-          <section class="panel resume-register-panel">
-            <div class="panel-heading"><span class="icon">▤</span><div><h2>이력서 자료</h2><p>PDF를 올리거나 내용을 직접 입력하세요</p></div><span class="badge">내 자료</span></div>
+        <div class="intro resume-register-intro"><div><div class="eyebrow">YOUR EXPERIENCE</div><h1>나의 이력서를<br>관리해요<span>.</span></h1><p>지원 분야에 맞는 이력서를 골라 공고와 비교할 수 있어요.</p></div></div>
+        <div class="resume-layout">
+          <form id="resume-form">
+            <section class="panel resume-register-panel">
+            <div class="panel-heading"><span class="icon">▤</span><div><h2 id="resume-editor-title">새 이력서 등록</h2><p>직무별 버전을 따로 저장할 수 있어요</p></div><button id="new-resume" class="secondary" type="button">새 이력서</button></div>
+            <div class="resume-name-field"><label for="resume-name">이력서 이름</label><input id="resume-name" required maxlength="80" placeholder="예: 데이터 분석 직무용"></div>
             <label id="drop" class="drop" tabindex="0" role="button" aria-label="이력서 PDF 선택"><input id="pdf" type="file" accept="application/pdf,.pdf" hidden><span class="file-icon">↑</span><strong id="filename">이력서 PDF를 여기에 놓아주세요</strong><span>또는 클릭해서 파일 선택</span><small>PDF · 최대 5MB · 텍스트형 PDF 권장</small></label>
             <div class="field-heading"><label for="resume">이력서 내용</label><span>직접 입력·수정 가능</span></div>
             <textarea id="resume" required minlength="30" maxlength="40000" placeholder="PDF를 올리거나 이력서 내용을 붙여넣어 주세요."></textarea>
             <div class="hint">저장한 이력서는 이 컴퓨터의 CareerFlow에 보관됩니다.</div>
-            <div class="resume-actions"><button id="sample" class="secondary" type="button">예시 이력서 불러오기</button><button id="reset" class="secondary" type="button">입력 지우기</button><button id="save-resume" class="primary" type="submit">이력서 저장</button></div>
+            <div class="resume-actions"><button id="sample" class="secondary" type="button">예시 이력서 불러오기</button><button id="reset" class="secondary" type="button">입력 지우기</button><button id="copy-resume" class="secondary" type="button" hidden>복제해 새 이력서로</button><button id="save-resume" class="primary" type="submit">이력서 등록</button></div>
           </section>
-        </form>
+          </form>
+          <aside class="panel resume-library">
+            <div class="panel-heading"><span class="icon">▥</span><div><h2>저장한 이력서</h2><p>비교에 사용할 버전을 선택하세요</p></div><span id="resume-count" class="badge">0개</span></div>
+            <div id="resume-list" class="resume-list"></div>
+            <div class="resume-library-tip"><span class="eyebrow">VERSIONING TIP</span><strong>공통 이력서는 남겨두고, 직무별 버전을 복제해 보세요.</strong><p>지원 직무와 가까운 프로젝트를 앞에 두고, 관련 기술과 경험을 강조하면 여러 버전을 쉽게 관리할 수 있어요.</p></div>
+          </aside>
+        </div>
         <div id="resume-status" class="form-status" role="status" aria-live="polite"></div>
       </section>
 
