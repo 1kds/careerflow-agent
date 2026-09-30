@@ -55,10 +55,12 @@ function renderResumeList() {
     const actions = element('div', ''); actions.className = 'resume-item-actions';
     const use = action(active ? '사용 중' : '비교에 사용', () => selectResume(resume.id), active ? 'secondary' : 'primary');
     use.disabled = active;
+    const remove = action('삭제', () => deleteResume(resume.id));
+    remove.classList.add('delete-action');
     actions.append(use,
       action('수정', () => loadResumeIntoEditor(resume.id)),
       action('복제', () => duplicateResume(resume.id)),
-      action('삭제', () => deleteResume(resume.id)));
+      remove);
     card.append(heading, meta, actions); list.append(card);
   }
 }
@@ -400,7 +402,7 @@ async function navigate(next) {
         const toggle=action('분석 결과와 준비 할 일 보기',()=>openJob(job.id,detail,toggle),'secondary');
         toggle.classList.add('archive-toggle');toggle.setAttribute('aria-expanded','false');
         const actions=element('div','');actions.className='archive-actions';
-        const remove=action('삭제',()=>deleteArchivedJob(job.id),'secondary');remove.classList.add('archive-delete');
+        const remove=action('삭제',()=>deleteArchivedJob(job.id),'secondary');remove.classList.add('delete-action');
         actions.append(toggle,remove);summary.append(actions);row.append(summary,detail);$('manage-list').append(row);
       }
       manageStatus(data.jobs.length?'저장한 비교 결과를 다시 확인할 수 있어요.':'아직 비교 결과가 없어요. 공고를 선택하고 이력서를 비교해보세요.');
@@ -412,7 +414,7 @@ async function navigate(next) {
         try{const result=await post('/api/tasks/delete',{task_ids:[...selected]});if(view==='tasks'){await navigate('tasks');manageStatus(`${result.deleted_count}개를 삭제했습니다. 공고는 유지되며 보관함에서 다시 등록할 수 있습니다.`);}}
         catch(error){manageStatus(error.message);deleteButton.disabled=false;}
       });
-      deleteButton.classList.add('task-delete');
+      deleteButton.classList.add('delete-action','task-delete');
       function selectionChanged(){deleteButton.disabled=!selected.size||pending>0;}
       toolbar.append(deleteButton);$('manage-list').append(toolbar);selectionChanged();
       for(const task of data.tasks){
