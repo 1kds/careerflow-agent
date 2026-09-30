@@ -242,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = analyze(payload)
                 result['resume_name'] = str(payload.get('resume_name', ''))[:80]
                 result['archive_id'] = self.server.store.save(payload, result)
+            elif path == '/api/jobs/delete':
+                result = self.server.store.delete_job(payload)
             elif path == '/api/tasks':
                 result = self.server.store.add_task(payload)
             elif path == '/api/tasks/status':

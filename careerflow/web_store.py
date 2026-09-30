@@ -15,6 +15,7 @@ class WebStore:
                     id INTEGER PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
                     company TEXT, position TEXT, posting TEXT, deadline TEXT,
                     source_url TEXT, result TEXT NOT NULL,
+                    deleted_at TEXT,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS web_tasks (
                     id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES web_jobs(id),
@@ -54,6 +55,8 @@ class WebStore:
             ''')
             if 'deleted_at' not in {row[1] for row in db.execute('PRAGMA table_info(web_tasks)')}:
                 db.execute('ALTER TABLE web_tasks ADD COLUMN deleted_at TEXT')
+            if 'deleted_at' not in {row[1] for row in db.execute('PRAGMA table_info(web_jobs)')}:
+                db.execute('ALTER TABLE web_jobs ADD COLUMN deleted_at TEXT')
             legacy_resume = db.execute(
                 'SELECT content,filename,updated_at FROM web_resume_profile WHERE id=1').fetchone()
             has_resumes = db.execute('SELECT 1 FROM web_resumes LIMIT 1').fetchone()
@@ -257,15 +260,26 @@ class WebStore:
         return self.query('''INSERT INTO web_jobs(identity,company,position,posting,deadline,source_url,result)
             VALUES(?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
             deadline=excluded.deadline,source_url=excluded.source_url,result=excluded.result,
-            updated_at=CURRENT_TIMESTAMP RETURNING id''',
+            deleted_at=NULL,updated_at=CURRENT_TIMESTAMP RETURNING id''',
             (identity, *fields, str(payload.get('deadline', ''))[:20],
              str(payload.get('source_url', ''))[:2000], json.dumps(result, ensure_ascii=False)))[0]['id']
 
     def jobs(self):
-        return self.query('SELECT id,company,position,deadline,updated_at FROM web_jobs ORDER BY updated_at DESC,id DESC')
+        return self.query('''SELECT id,company,position,deadline,updated_at FROM web_jobs
+            WHERE deleted_at IS NULL ORDER BY updated_at DESC,id DESC''')
+
+    def delete_job(self, payload):
+        job_id = payload.get('job_id')
+        if type(job_id) is not int or job_id <= 0:
+            raise ValueError('삭제할 보관 공고를 선택해주세요.')
+        rows = self.query('''UPDATE web_jobs SET deleted_at=CURRENT_TIMESTAMP
+            WHERE id=? AND deleted_at IS NULL RETURNING id''', (job_id,))
+        if not rows:
+            raise ValueError('보관함에서 공고를 찾을 수 없습니다.')
+        return {'ok': True, 'deleted_id': job_id}
 
     def detail(self, job_id):
-        rows = self.query('SELECT * FROM web_jobs WHERE id=?', (job_id,))
+        rows = self.query('SELECT * FROM web_jobs WHERE id=? AND deleted_at IS NULL', (job_id,))
         if not rows:
             raise ValueError('공고를 찾을 수 없습니다.')
         job = rows[0]

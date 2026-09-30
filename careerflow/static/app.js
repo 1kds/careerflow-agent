@@ -282,14 +282,19 @@ for(const event of ['dragleave','drop']) $('drop').addEventListener(event,e=>{e.
 function resumeStatus(message, error=false) { $('resume-status').textContent=message; $('resume-status').className=error?'form-status error':'form-status'; }
 $('resume-form').addEventListener('submit',async event=>{
   event.preventDefault(); if(busy)return;
+  const wasEditing = editingResumeId !== null;
   lockResumeForm(true); $('save-resume').textContent='저장 중…';
   try {
     const data=await post('/api/resumes',{resume_id:editingResumeId,name:$('resume-name').value,content:$('resume').value,filename:$('filename').textContent||'직접 입력'});
     savedResumes=data.resumes; selectedResumeId=data.selected_resume_id;
     savedResume=data.resume.content; savedResumeFilename=data.resume.filename; savedResumeName=data.resume.name;
-    editingResumeId=data.resume.id; $('resume-editor-title').textContent='이력서 수정'; $('copy-resume').hidden=false;
-    resumeDraftBaseline = {name:data.resume.name,content:data.resume.content,filename:data.resume.filename};
-    renderSavedResume(); renderResumeList(); resumeStatus('저장했어요. 이 이력서를 공고 비교에 사용합니다.');
+    if (wasEditing) startNewResume();
+    else {
+      editingResumeId=data.resume.id; $('resume-editor-title').textContent='이력서 수정'; $('copy-resume').hidden=false;
+      resumeDraftBaseline = {name:data.resume.name,content:data.resume.content,filename:data.resume.filename};
+    }
+    renderSavedResume(); renderResumeList();
+    resumeStatus(wasEditing?'변경사항을 저장하고 입력란을 비웠어요. 저장한 이력서는 목록에 유지됩니다.':'저장했어요. 이 이력서를 공고 비교에 사용합니다.');
   } catch(error) { resumeStatus(error.message,true); }
   finally { lockResumeForm(false); $('save-resume').textContent=editingResumeId?'변경사항 저장':'새 이력서 저장'; }
 });
@@ -394,17 +399,20 @@ async function navigate(next) {
         const detail=element('section','');detail.className='archive-job-detail';detail.hidden=true;
         const toggle=action('분석 결과와 준비 할 일 보기',()=>openJob(job.id,detail,toggle),'secondary');
         toggle.classList.add('archive-toggle');toggle.setAttribute('aria-expanded','false');
-        summary.append(toggle);row.append(summary,detail);$('manage-list').append(row);
+        const actions=element('div','');actions.className='archive-actions';
+        const remove=action('삭제',()=>deleteArchivedJob(job.id),'secondary');remove.classList.add('archive-delete');
+        actions.append(toggle,remove);summary.append(actions);row.append(summary,detail);$('manage-list').append(row);
       }
       manageStatus(data.jobs.length?'저장한 비교 결과를 다시 확인할 수 있어요.':'아직 비교 결과가 없어요. 공고를 선택하고 이력서를 비교해보세요.');
     } else {
       const data=await get('/api/tasks'); const selected=new Set(data.tasks.filter(task=>task.status==='done').map(task=>task.id));let pending=0;
       const toolbar=element('div','');toolbar.className='task-toolbar';
-      const deleteButton=action('선택 삭제',async()=>{
+      const deleteButton=action('삭제',async()=>{
         if(!selected.size||!window.confirm(`선택한 할 일 ${selected.size}개를 삭제할까요?`))return;deleteButton.disabled=true;
         try{const result=await post('/api/tasks/delete',{task_ids:[...selected]});if(view==='tasks'){await navigate('tasks');manageStatus(`${result.deleted_count}개를 삭제했습니다. 공고는 유지되며 보관함에서 다시 등록할 수 있습니다.`);}}
         catch(error){manageStatus(error.message);deleteButton.disabled=false;}
       });
+      deleteButton.classList.add('task-delete');
       function selectionChanged(){deleteButton.disabled=!selected.size||pending>0;}
       toolbar.append(deleteButton);$('manage-list').append(toolbar);selectionChanged();
       for(const task of data.tasks){
@@ -415,6 +423,14 @@ async function navigate(next) {
       manageStatus(data.tasks.length?'체크하면 완료로 저장됩니다. 삭제 버튼을 누르면 체크된 할 일을 삭제합니다.':'등록된 할 일이 없습니다. 공고 보관함에서 분석 결과를 열어 등록해주세요.');
     }
   } catch(error) { manageStatus(error.message); }
+}
+async function deleteArchivedJob(id) {
+  if(!window.confirm('이 공고의 비교 결과를 보관함에서 삭제할까요? 등록한 준비 할 일은 계속 유지됩니다.'))return;
+  try {
+    await post('/api/jobs/delete',{job_id:id});
+    await navigate('jobs');
+    manageStatus('공고 비교 결과를 보관함에서 삭제했어요. 등록한 준비 할 일은 유지됩니다.');
+  } catch(error) { manageStatus(error.message || '공고를 삭제하지 못했어요. 다시 시도해 주세요.'); }
 }
 async function openJob(id, detail, toggle) {
   if (!detail.hidden) {
