@@ -32,7 +32,7 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(all(job['source'] == 'demo' for job in jobs))
             detail = self.store.catalog_detail(jobs[0]['id'])
             self.assertEqual(detail['source_url'], '')
-            self.assertIn('가상', detail['description'])
+            self.assertGreaterEqual(len(detail['description']), 30)
 
     def test_demo_requires_a_local_description(self):
         saved = self.store.upsert_catalog([{

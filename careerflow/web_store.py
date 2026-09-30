@@ -40,6 +40,11 @@ class WebStore:
                     category TEXT PRIMARY KEY, last_synced_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS job_preferences (
                     name TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS web_resume_profile (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    content TEXT NOT NULL,
+                    filename TEXT NOT NULL DEFAULT '직접 입력',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             ''')
             if 'deleted_at' not in {row[1] for row in db.execute('PRAGMA table_info(web_tasks)')}:
                 db.execute('ALTER TABLE web_tasks ADD COLUMN deleted_at TEXT')
@@ -135,6 +140,24 @@ class WebStore:
     def set_preference(self, name, value):
         self.query('''INSERT INTO job_preferences(name,value) VALUES(?,?)
             ON CONFLICT(name) DO UPDATE SET value=excluded.value''', (name, str(value)))
+
+    def resume_profile(self):
+        rows = self.query('SELECT content,filename,updated_at FROM web_resume_profile WHERE id=1')
+        return rows[0] if rows else None
+
+    def save_resume_profile(self, payload):
+        content = payload.get('content')
+        if not isinstance(content, str):
+            raise ValueError('이력서 내용을 입력해주세요.')
+        content = content.strip()
+        if not 30 <= len(content) <= 40000:
+            raise ValueError('이력서는 30~40,000자로 입력해주세요.')
+        filename = str(payload.get('filename') or '직접 입력').strip()[:160] or '직접 입력'
+        rows = self.query('''INSERT INTO web_resume_profile(id,content,filename,updated_at)
+            VALUES(1,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET
+            content=excluded.content,filename=excluded.filename,updated_at=CURRENT_TIMESTAMP
+            RETURNING content,filename,updated_at''', (content, filename))
+        return rows[0]
 
     def save(self, payload, result):
         fields = [str(payload.get(k, '')).strip() for k in ('company', 'position', 'posting')]

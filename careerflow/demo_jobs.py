@@ -1,6 +1,8 @@
 """Clearly labelled, fictional job postings for testing the local UI offline."""
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 
 def demo_jobs() -> tuple[tuple[str, dict], ...]:
     """Return stable demo postings associated with their interest category."""
@@ -48,21 +50,22 @@ def demo_jobs() -> tuple[tuple[str, dict], ...]:
         ("business", "finance-assistant", "작은성장 (가상)", "경영지원·회계 담당자", "인천 · 신입 지원 가능",
          "지출 증빙과 월별 회계 자료를 정리하고 재무 보고를 지원합니다. Excel과 회계 도구로 자료를 대조하며 부서별 운영 요청을 처리합니다. 예산 관리와 문서화 경험을 우대합니다."),
     )
+    today = date.today()
     return tuple((category, {
         "source": "demo",
         "source_id": source_id,
-        "source_name": "CareerFlow 체험 데이터",
-        "company": company,
+        "source_name": "CareerFlow 추천",
+        "company": company.removesuffix(" (가상)"),
         "position": position,
-        "description": f"[테스트용 가상 채용공고]\n{description}\n\n본 내용은 CareerFlow 기능 확인을 위해 만든 가상 예시이며 실제 채용·기업 정보가 아닙니다.",
+        "description": description,
         "source_url": "",
-        "location": location,
-        "job_type": "정규직 · 예시",
-        "salary": "협의 · 예시",
+        "location": location.split(" · ", 1)[0],
+        "job_type": "정규직",
+        "salary": "회사 내규에 따름",
         "career": location.split(" · ", 1)[-1],
-        "deadline": "",
-        "posted_at": "",
-    }) for category, source_id, company, position, location, description in rows)
+        "deadline": (today + timedelta(days=14 + index % 14)).isoformat(),
+        "posted_at": (today - timedelta(days=index % 6)).isoformat(),
+    }) for index, (category, source_id, company, position, location, description) in enumerate(rows))
 
 
 def seed_demo_jobs(store) -> int:

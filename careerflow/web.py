@@ -86,11 +86,11 @@ def analyze(payload: dict) -> dict:
                 evidence = next((line.strip() for line in posting.splitlines() if skill.casefold() in line.casefold()), '')
                 found = next((line.strip() for line in resume.splitlines() if skill.casefold() in line.casefold()), '')
                 matches.append({'skill': skill, 'found': bool(found), 'job': evidence, 'resume': found})
-        return {'mode': 'demo', 'matches': matches, 'events': ['공고 본문 읽기', '직무별 키워드 포함 여부 비교', '원문 근거 표시'], 'summary': '로컬 키워드 비교입니다. AI·툴콜링을 실행하지 않았으며, 필수/우대 해석이나 합격 가능성을 판단하지 않습니다.'}
+        return {'mode': 'demo', 'matches': matches, 'events': ['공고 확인', '경험과 요구 역량 비교', '근거 표시'], 'summary': '공고에서 요구하는 역량과 이력서에 적힌 경험을 비교했어요. 표현이 겹치는 항목을 보여주며 경험의 수준이나 합격 가능성을 평가하지는 않아요.'}
     if mode not in {'gemini', 'openai'} or payload.get('consent') is not True:
-        raise ValueError('AI 분석 공급자를 선택하고 외부 전송에 동의해주세요.')
+        raise ValueError('AI 비교를 진행하려면 동의가 필요해요.')
     if not os.getenv('GEMINI_API_KEY' if mode == 'gemini' else 'OPENAI_API_KEY'):
-        raise ValueError(f'{mode} API 키가 서버에 없습니다. Gemini는 서버를 종료한 뒤 python -m careerflow.web --ask-key 로 실행해주세요. OpenAI는 OPENAI_API_KEY 환경변수를 설정한 뒤 서버를 재시작해주세요.')
+        raise ValueError('선택한 분석 방식을 사용할 수 없어요. 기본 비교를 선택해 주세요.')
     from .agent import CareerFlowAgent
     from .db import Database
     from .tools import ToolRegistry
@@ -151,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, {'jobs': self.server.store.jobs()})
                 if path == '/api/tasks':
                     return self.reply(200, {'tasks': self.server.store.tasks()})
+                if path == '/api/resume':
+                    return self.reply(200, {'resume': self.server.store.resume_profile()})
                 if path == '/api/discovery':
                     from .job_sources import INTERESTS, interest, source_status
                     query = parse_qs(urlsplit(self.path).query)
@@ -194,7 +196,9 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError('잘못된 요청입니다.')
             path = urlsplit(self.path).path
-            if path == '/api/pdf':
+            if path == '/api/resume':
+                result = {'resume': self.server.store.save_resume_profile(payload)}
+            elif path == '/api/pdf':
                 result = {'text': extract_pdf(base64.b64decode(payload.get('data', ''), validate=True))}
             elif path == '/api/preferences':
                 from .job_sources import interest
@@ -239,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.reply(400, {'error': str(exc)})
         except Exception:
-            self.reply(500, {'error': '처리에 실패했습니다. PDF 형식 또는 모델 설정·사용량을 확인한 뒤 다시 시도해주세요.'})
+            self.reply(500, {'error': '요청을 처리하지 못했어요. 입력 내용을 확인하고 다시 시도해주세요.'})
 
 
 def main():
