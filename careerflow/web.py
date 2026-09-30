@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 ASSETS = Path(__file__).with_name('static')
 MAX_BODY = 8 * 1024 * 1024
